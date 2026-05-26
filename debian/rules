@@ -1,0 +1,55 @@
+#!/usr/bin/make -f
+
+# Uncomment to enable verbose debhelper output
+#export DH_VERBOSE = 1
+
+PACKAGE    = squidstats
+DESTDIR    = $(CURDIR)/debian/$(PACKAGE)
+INSTALL_ROOT = /opt/SquidStats
+OPT_DIR    = $(DESTDIR)$(INSTALL_ROOT)
+VENV_BUILD = $(CURDIR)/debian/.build-venv
+VENV_FINAL = $(INSTALL_ROOT)/venv
+VENV_DEST  = $(OPT_DIR)/venv
+APP_DEST   = $(OPT_DIR)/app
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	@echo "=== No build step for SquidStats application package ==="
+
+override_dh_auto_install:
+	# ── Application directories ───────────────────────────────────────────
+	install -d $(APP_DEST)
+	install -d $(DESTDIR)/etc/$(PACKAGE)
+	install -d $(DESTDIR)/var/log/$(PACKAGE)
+	install -d $(DESTDIR)/var/lib/$(PACKAGE)
+
+	# ── Copy application source files ────────────────────────────────────
+	cp app.py config.py manage_db.py alembic.ini babel.cfg $(APP_DEST)/
+	cp requirements.txt $(APP_DEST)/
+	cp -r alembic/   $(APP_DEST)/
+	cp -r database/  $(APP_DEST)/
+	cp -r parsers/   $(APP_DEST)/
+	cp -r routes/    $(APP_DEST)/
+	cp -r services/  $(APP_DEST)/
+	cp -r static/    $(APP_DEST)/
+	cp -r templates/ $(APP_DEST)/
+	cp -r tools/     $(APP_DEST)/
+	cp -r translations/ $(APP_DEST)/
+	cp -r utils/     $(APP_DEST)/
+
+	# ── Configuration template ───────────────────────────────────────────
+	install -m 0640 example.env $(DESTDIR)/etc/$(PACKAGE)/squidstats.env
+
+override_dh_auto_test:
+	@echo "Tests are run in a separate CI stage; skipping here."
+
+# Prevent stripping of Python .so files (can break extensions)
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
+
+override_dh_fixperms:
+	dh_fixperms
+	# Config file must not be world-readable (may contain secrets)
+	chmod 0640 $(DESTDIR)/etc/$(PACKAGE)/squidstats.env 2>/dev/null || true

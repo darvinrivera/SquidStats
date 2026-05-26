@@ -1,0 +1,92 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # ── Create dedicated system user ──────────────────────────────────
+        if ! getent passwd squidstats > /dev/null 2>&1; then
+            adduser \
+                --system \
+                --group \
+                --no-create-home \
+                --home /var/lib/squidstats \
+                --shell /usr/sbin/nologin \
+                --gecos "SquidStats web application" \
+                squidstats
+        fi
+
+        # Add to the proxy group so the service can read squid access logs
+        if getent group proxy > /dev/null 2>&1; then
+            usermod -aG proxy squidstats 2>/dev/null || true
+        fi
+
+        # ── Runtime directories ───────────────────────────────────────────
+        install -d -m 0750 -o squidstats -g squidstats /var/log/squidstats
+        install -d -m 0750 -o squidstats -g squidstats /var/lib/squidstats
+
+        # ── Configuration file ────────────────────────────────────────────
+        # On first install the example config is the real config; protect it
+        if [ -f /etc/squidstats/squidstats.env ]; then
+            chown root:squidstats /etc/squidstats/squidstats.env
+            chmod 0640 /etc/squidstats/squidstats.env
+        fi
+
+        # ── Create application .env configuration file if missing ───────
+        if [ ! -f /opt/SquidStats/app/.env ]; then
+            cat > /opt/SquidStats/app/.env <<'EOF'
+VERSION=2.3.2
+SQUID_HOST="127.0.0.1"
+SQUID_PORT=3128
+# Multi-proxy load-balancing (optional): comma-separated host:port list.
+# When set, overrides SQUID_HOST/SQUID_PORT for the active-connections page.
+# Example: SQUID_HOSTS="192.168.0.10:3128,192.168.0.11:3128"
+SQUID_HOSTS=
+LOG_FORMAT=DETAILED
+FLASK_DEBUG=True
+DATABASE_TYPE="SQLITE"
+SQUID_LOG="/var/log/squid/access.log"
+SQUID_CACHE_LOG="/var/log/squid/cache.log"
+DATABASE_STRING_CONNECTION="./squidstats.db"
+REFRESH_INTERVAL=60
+HTTP_PROXY=""
+HTTPS_PROXY=
+NO_PROXY=
+SQUID_CONFIG_PATH=/etc/squid/squid.conf
+ACL_FILES_DIR=/etc/squid/acl
+LISTEN_HOST="0.0.0.0"
+LISTEN_PORT=8080
+FIRST_PASSWORD="mipasswordsegura"
+JWT_EXPIRY_HOURS=24
+MAX_LOGIN_ATTEMPTS=5
+LOCKOUT_DURATION_MINUTES=15
+EOF
+            chown root:squidstats /opt/SquidStats/app/.env
+            chmod 0640 /opt/SquidStats/app/.env
+        fi
+
+        # ── Create Python virtualenv on the target system ────────────────
+        if [ ! -d /opt/SquidStats/venv ]; then
+            python3 -m venv /opt/SquidStats/venv
+            /opt/SquidStats/venv/bin/python3 -m pip install --upgrade pip setuptools wheel
+            /opt/SquidStats/venv/bin/pip install --no-cache-dir -r /opt/SquidStats/app/requirements.txt
+        fi
+
+        # ── Application directory ownership ──────────────────────────────
+        # The app code is owned by root and group-owned by squidstats so the
+        # service user can execute and write only where needed.
+        chown -R root:squidstats /opt/SquidStats/
+        find /opt/SquidStats/ -type d -exec chmod 2750 {} +
+        find /opt/SquidStats/ -type f -exec chmod 0640 {} +
+        chmod -R g+rwX /opt/SquidStats/
+
+        # Ensure the runtime logs directory exists and is writable.
+        install -d -m 2770 -o squidstats -g squidstats /opt/SquidStats/app/logs
+
+        # Allow the service user to write to the data directory
+        chown -R squidstats:squidstats /var/lib/squidstats/
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
